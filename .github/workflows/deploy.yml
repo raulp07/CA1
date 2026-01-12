@@ -5,9 +5,9 @@ on:
     branches: [ "main" ]
 
 env:
-  AWS_REGION: us-east-1                   # <-- Cambia esto a tu región de AWS (ej. us-east-1)
-  ECR_REPOSITORY: ca1-api                 # <-- El nombre de tu repositorio en Amazon ECR
-  APP_RUNNER_SERVICE: ca1-service         # <-- El nombre de tu servicio en App Runner
+  AWS_REGION: us-east-2                   # Región Ohio
+  ECR_REPOSITORY: ca1-app                 # Tu repositorio en Amazon ECR
+  APP_RUNNER_SERVICE: ca1-service         # El nombre de tu servicio en App Runner
 
 jobs:
   deploy:
