@@ -63,24 +63,24 @@ public class ProductsController : ControllerBase
     }
 
 
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(int id)
-    {
-        // Validación de Integridad: URL ID vs Body ID
-        if (id != 0)
-        {
-            return BadRequest("ID mismatch between URL and Body.");
-        }
+    // [HttpDelete("{id}")]
+    // public async Task<IActionResult> Delete(int id)
+    // {
+    //     // Validación de Integridad: URL ID vs Body ID
+    //     if (id != 0)
+    //     {
+    //         return BadRequest("ID mismatch between URL and Body.");
+    //     }
 
-        try
-        {
-            await _productService.DeleteAsync(id);
-            // 204 No Content es el estándar para Updates exitosos que no devuelven datos
-            return NoContent();
-        }
-        catch (KeyNotFoundException)
-        {
-            return NotFound($"Product {id} not found.");
-        }
-    }
+    //     try
+    //     {
+    //         await _productService.DeleteAsync(id);
+    //         // 204 No Content es el estándar para Updates exitosos que no devuelven datos
+    //         return NoContent();
+    //     }
+    //     catch (KeyNotFoundException)
+    //     {
+    //         return NotFound($"Product {id} not found.");
+    //     }
+    // }
 }
