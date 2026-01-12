@@ -1,4 +1,4 @@
-name: Deploy to AWS App Runner
+name: Build and Push to ECR
 
 on:
   push:
@@ -7,11 +7,10 @@ on:
 env:
   AWS_REGION: us-east-2                   # Región Ohio
   ECR_REPOSITORY: ca1-app                 # Tu repositorio en Amazon ECR
-  APP_RUNNER_SERVICE: ca1-service         # El nombre de tu servicio en App Runner
 
 jobs:
-  deploy:
-    name: Build, Push and Deploy
+  build-and-push:
+    name: Build and Push to ECR
     runs-on: ubuntu-latest
 
     steps:
@@ -30,21 +29,17 @@ jobs:
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build, tag, y push de la imagen a Amazon ECR
-      id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Construir el contenedor docker y mandarlo a ECR
+        # Construir la imagen Docker
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        
+        # Subir ambas versiones a ECR
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-    - name: Desplegar en Amazon App Runner
-      uses: awslabs/amazon-app-runner-deploy@main
-      with:
-        service: ${{ env.APP_RUNNER_SERVICE }}
-        image: ${{ steps.build-image.outputs.image }}
-        access-role-arn: ${{ secrets.AWS_ROLE_ARN }} # Opcional: Si tu App Runner necesita permisos especiales
-        region: ${{ env.AWS_REGION }}
-        wait-for-service-stability-seconds: 600
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        echo "✅ Imagen subida: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        echo "✅ Imagen subida: $ECR_REGISTRY/$ECR_REPOSITORY:latest"
