@@ -1,22 +1,169 @@
-name: Build and Push to ECR
+# ============================================================================
+# 🚀 WORKFLOW: Build, Test, Analyze and Push to ECR
+# ============================================================================
+# Este archivo define un pipeline de CI/CD que se ejecuta automáticamente
+# cuando haces "git push" a la rama main.
+#
+# FLUJO COMPLETO:
+# git push → Tests → SonarCloud → Build Docker → Push a ECR → App Runner
+# ============================================================================
 
+# ----------------------------------------------------------------------------
+# NOMBRE DEL WORKFLOW
+# ----------------------------------------------------------------------------
+name: Build, Test and Push to ECR
+
+# ----------------------------------------------------------------------------
+# DISPARADOR (TRIGGER) - ¿Cuándo se ejecuta este workflow?
+# ----------------------------------------------------------------------------
 on:
-  push:
-    branches: [ "main" ]
+  push:                        # Se activa cuando alguien hace "git push"
+    branches: [ "main" ]       # SOLO si el push es a la rama "main"
+  pull_request:                # También se ejecuta en Pull Requests
+    branches: [ "main" ]       # Para validar código antes de merge
 
+# ----------------------------------------------------------------------------
+# VARIABLES DE ENTORNO GLOBALES
+# ----------------------------------------------------------------------------
 env:
-  AWS_REGION: us-east-2                   # Región Ohio
-  ECR_REPOSITORY: ca1-app                 # Tu repositorio en Amazon ECR
+  # Región de AWS donde está tu ECR (Ohio = us-east-2)
+  AWS_REGION: us-east-2
+  
+  # Nombre de tu repositorio en Amazon ECR
+  ECR_REPOSITORY: ca1-app
+  
+  # ⚠️ IMPORTANTE: Estos son los identificadores de tu proyecto en SonarCloud
+  # El TOKEN va en GitHub Secrets, NO aquí en el archivo
+  SONAR_ORGANIZATION: raulp07              # Tu organization en SonarCloud
+  SONAR_PROJECT_KEY: raulp07_CA1           # El project key (org_repo)
 
+# ----------------------------------------------------------------------------
+# JOBS - Los trabajos que se van a ejecutar
+# ----------------------------------------------------------------------------
 jobs:
-  build-and-push:
-    name: Build and Push to ECR
+  
+  # ==========================================================================
+  # JOB 1: TEST AND ANALYZE (Pruebas y Análisis de Código)
+  # ==========================================================================
+  # Este job ejecuta las pruebas unitarias y el análisis de SonarCloud
+  test-and-analyze:
+    name: 🧪 Test and 🔍 SonarCloud Analysis
     runs-on: ubuntu-latest
+    
+    steps:
+    # ========================================================================
+    # PASO 1: CHECKOUT DEL CÓDIGO
+    # ========================================================================
+    # fetch-depth: 0 es REQUERIDO por SonarCloud para analizar el historial
+    - name: Checkout del código
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # SonarCloud necesita el historial completo de Git
+
+    # ========================================================================
+    # PASO 2: CONFIGURAR .NET SDK
+    # ========================================================================
+    # Instala la versión de .NET necesaria para compilar y probar el proyecto
+    - name: Configurar .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'  # Versión de .NET de tu proyecto
+
+    # ========================================================================
+    # PASO 3: INSTALAR JAVA (Requerido por SonarCloud Scanner)
+    # ========================================================================
+    # El scanner de SonarCloud está escrito en Java
+    - name: Configurar Java 17 (requerido por SonarCloud)
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # ========================================================================
+    # PASO 4: INSTALAR SONARCLOUD SCANNER
+    # ========================================================================
+    # Instala la herramienta que analiza el código
+    - name: Instalar SonarCloud Scanner
+      run: |
+        dotnet tool install --global dotnet-sonarscanner
+
+    # ========================================================================
+    # PASO 5: RESTAURAR DEPENDENCIAS
+    # ========================================================================
+    # Descarga todos los paquetes NuGet necesarios
+    - name: Restaurar dependencias
+      run: dotnet restore
+
+    # ========================================================================
+    # PASO 6: INICIAR ANÁLISIS DE SONARCLOUD
+    # ========================================================================
+    # Inicia el proceso de análisis ANTES de compilar
+    # SonarCloud intercepta la compilación para analizar el código
+    - name: Iniciar análisis de SonarCloud
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        dotnet sonarscanner begin \
+          /k:"${{ env.SONAR_PROJECT_KEY }}" \
+          /o:"${{ env.SONAR_ORGANIZATION }}" \
+          /d:sonar.token="${{ secrets.SONAR_TOKEN }}" \
+          /d:sonar.host.url="https://sonarcloud.io" \
+          /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
+
+    # ========================================================================
+    # PASO 7: COMPILAR EL PROYECTO
+    # ========================================================================
+    # Compila sin restaurar (ya lo hicimos antes)
+    - name: Compilar proyecto
+      run: dotnet build --no-restore
+
+    # ========================================================================
+    # PASO 8: EJECUTAR PRUEBAS UNITARIAS
+    # ========================================================================
+    # Ejecuta todas las pruebas y genera reporte de cobertura
+    # El reporte de cobertura se envía a SonarCloud
+    - name: Ejecutar pruebas unitarias
+      run: |
+        dotnet test --no-build --verbosity normal \
+          --collect:"XPlat Code Coverage" \
+          --results-directory TestResults \
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+    # ========================================================================
+    # PASO 9: FINALIZAR ANÁLISIS DE SONARCLOUD
+    # ========================================================================
+    # Envía los resultados del análisis a SonarCloud
+    - name: Finalizar análisis de SonarCloud
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+
+  # ==========================================================================
+  # JOB 2: BUILD AND PUSH (Construir y Subir a ECR)
+  # ==========================================================================
+  # Este job solo se ejecuta si el job anterior (test-and-analyze) pasó
+  # Y solo en la rama main (no en Pull Requests)
+  build-and-push:
+    name: 🐳 Build and Push to ECR
+    runs-on: ubuntu-latest
+    
+    # ⚠️ DEPENDENCIA: Este job espera a que test-and-analyze termine con éxito
+    needs: test-and-analyze
+    
+    # ⚠️ CONDICIÓN: Solo ejecutar en push a main (no en PRs)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+    # ========================================================================
+    # PASO 1: CHECKOUT DEL CÓDIGO
+    # ========================================================================
     - name: Checkout del código
       uses: actions/checkout@v4
 
+    # ========================================================================
+    # PASO 2: CONFIGURAR CREDENCIALES DE AWS
+    # ========================================================================
     - name: Configurar credenciales de AWS
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -24,10 +171,16 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
+    # ========================================================================
+    # PASO 3: LOGIN EN AMAZON ECR
+    # ========================================================================
     - name: Login en Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
+    # ========================================================================
+    # PASO 4: BUILD, TAG Y PUSH DE LA IMAGEN
+    # ========================================================================
     - name: Build, tag, y push de la imagen a Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -43,3 +196,65 @@ jobs:
         
         echo "✅ Imagen subida: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
         echo "✅ Imagen subida: $ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+# ============================================================================
+# 📊 RESUMEN DEL PIPELINE
+# ============================================================================
+#
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │                         git push main                           │
+#   └─────────────────────────────────────────────────────────────────┘
+#                                    │
+#                                    ▼
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │  JOB 1: test-and-analyze                                        │
+#   │  ├── Checkout código                                            │
+#   │  ├── Setup .NET + Java                                          │
+#   │  ├── Restaurar dependencias                                     │
+#   │  ├── Iniciar SonarCloud                                         │
+#   │  ├── Compilar                                                   │
+#   │  ├── Ejecutar pruebas                                           │
+#   │  └── Finalizar SonarCloud → Envía resultados a sonarcloud.io   │
+#   └─────────────────────────────────────────────────────────────────┘
+#                                    │
+#                         (Solo si pasan las pruebas)
+#                                    │
+#                                    ▼
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │  JOB 2: build-and-push                                          │
+#   │  ├── Checkout código                                            │
+#   │  ├── Configurar AWS                                             │
+#   │  ├── Login ECR                                                  │
+#   │  └── Build + Push imagen Docker                                 │
+#   └─────────────────────────────────────────────────────────────────┘
+#                                    │
+#                                    ▼
+#   ┌─────────────────────────────────────────────────────────────────┐
+#   │                    ECR: ca1-app:latest                          │
+#   │                         ↓                                       │
+#   │                    App Runner detecta                           │
+#   │                         ↓                                       │
+#   │                    🌐 URL Pública                               │
+#   └─────────────────────────────────────────────────────────────────┘
+#
+# ============================================================================
+# 🔐 SECRETS NECESARIOS EN GITHUB
+# ============================================================================
+#
+# Ve a: Settings → Secrets → Actions → New repository secret
+#
+# | Nombre                  | Descripción                              |
+# |-------------------------|------------------------------------------|
+# | AWS_ACCESS_KEY_ID       | Tu Access Key de AWS IAM                 |
+# | AWS_SECRET_ACCESS_KEY   | Tu Secret Key de AWS IAM                 |
+# | SONAR_TOKEN             | Token de SonarCloud (My Account → Security) |
+#
+# ============================================================================
+# 🔗 RECURSOS ÚTILES
+# ============================================================================
+# 
+# Documentación GitHub Actions: https://docs.github.com/en/actions
+# Documentación SonarCloud: https://docs.sonarcloud.io/
+# Documentación AWS ECR: https://docs.aws.amazon.com/ecr/
+#
+# ============================================================================
